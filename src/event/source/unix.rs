@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::io;
 use std::time::Duration;
 
@@ -17,6 +18,9 @@ use super::super::{
 const TTY_TOKEN: Token = Token(0);
 const SIGNAL_TOKEN: Token = Token(1);
 const WAKE_TOKEN: Token = Token(2);
+
+const TTY_BUFFER_SIZE: usize = 8_192;
+const TTY_BUFFER_THRESHOLD: usize = 512;
 
 /// Creates a new pipe and returns `(read, write)` file descriptors.
 fn pipe() -> Result<(FileDesc, FileDesc)> {
@@ -38,10 +42,13 @@ pub(crate) struct UnixInternalEventSource {
     poll: Poll,
     events: Events,
     tty_buffer: Vec<u8>,
+    tty_buffer_head_index: usize,
+    tty_buffer_byte_count: usize,
     tty_fd: FileDesc,
     signals: Signals,
     wake_read_fd: FileDesc,
     wake_write_fd: FileDesc,
+    internal_events: VecDeque<InternalEvent>,
 }
 
 impl UnixInternalEventSource {
@@ -85,20 +92,33 @@ impl UnixInternalEventSource {
             PollOpt::level(),
         )?;
 
+        let mut tty_buffer = Vec::with_capacity(TTY_BUFFER_SIZE);
+        unsafe {
+            tty_buffer.set_len(TTY_BUFFER_SIZE);
+        }
+
         Ok(UnixInternalEventSource {
             poll,
             events: Events::with_capacity(3),
-            tty_buffer: Vec::new(),
+            tty_buffer,
+            tty_buffer_head_index: 0,
+            tty_buffer_byte_count: 0,
             tty_fd: input_fd,
             signals,
             wake_read_fd,
             wake_write_fd,
+            internal_events: VecDeque::with_capacity(8),
         })
     }
 }
 
 impl EventSource for UnixInternalEventSource {
     fn try_read(&mut self, timeout: Option<Duration>) -> Result<Option<InternalEvent>> {
+        // Do we have an event from the past? Return immediately.
+        if let Some(event) = self.internal_events.pop_front() {
+            return Ok(Some(event));
+        }
+
         let timeout = PollTimeout::new(timeout);
 
         loop {
@@ -115,26 +135,122 @@ impl EventSource for UnixInternalEventSource {
                     for event in events_count {
                         match event {
                             TTY_TOKEN => {
-                                self.tty_buffer.push(self.tty_fd.read_byte()?);
+                                if self.tty_buffer_head_index + self.tty_buffer_byte_count
+                                    >= TTY_BUFFER_SIZE
+                                {
+                                    panic!("There's something bad with event processing");
+                                }
 
-                                let input_available = self
-                                    .poll
-                                    .poll(&mut self.events, Some(Duration::from_secs(0)))
-                                    .map(|x| x > 0)?;
+                                // How many bytes we can read/fit into our buffer?
+                                let max_read_count = TTY_BUFFER_SIZE
+                                    - self.tty_buffer_head_index
+                                    - self.tty_buffer_byte_count;
 
-                                match parse_event(&self.tty_buffer, input_available) {
-                                    Ok(None) => {
-                                        // Not enough bytes to construct an InternalEvent
+                                // Read as many as possible bytes
+                                let read_count = self.tty_fd.read(
+                                    &mut self.tty_buffer
+                                        [self.tty_buffer_head_index + self.tty_buffer_byte_count..],
+                                    max_read_count,
+                                )?;
+
+                                // If we read something ...
+                                if read_count > 0 {
+                                    // ... check if there's more (buffer too small, ...).
+                                    let input_available = self
+                                        .poll
+                                        .poll(&mut self.events, Some(Duration::from_secs(0)))
+                                        .map(|x| x > 0)?;
+
+                                    // How many bytes we should process (what we had + new ones)
+                                    let mut byte_count_to_process =
+                                        self.tty_buffer_byte_count + read_count;
+
+                                    let mut consumed_bytes = 0;
+
+                                    // Loop until all bytes are processed
+                                    while byte_count_to_process > 0 {
+                                        // We have to use this loop, because `parse_event`, `parse_csi`, ...
+                                        // functions are not efficient. They're matching first bytes and also
+                                        // last byte (csi xterm mouse where last 'm'/'M' says up/down), etc.
+                                        //
+                                        // In other words, we try to parse with 1 byte, 2 bytes, 3 bytes,
+                                        // 4 bytes, 5 bytes, ... until the parser error or returns an event.
+                                        //
+                                        // If we will switch to the anes parser (two phases parsing), we can
+                                        // easily avoid this inner for loop. The reason is that the anes parser
+                                        // knows how to parse csi sequence without a meaning (knows when the csi
+                                        // sequence ends) and then it gives it a meaning. We do not need to
+                                        // advance with byte by byte here.
+                                        for i in 1..=byte_count_to_process {
+                                            // More bytes to read? Yes if we're not at the end of the buffer
+                                            // or poll says that there's more and we're at the end of the buffer
+                                            let more = i < byte_count_to_process || input_available;
+
+                                            match parse_event(
+                                                &self.tty_buffer[self.tty_buffer_head_index
+                                                    ..self.tty_buffer_head_index + i],
+                                                more,
+                                            ) {
+                                                Ok(None) => {
+                                                    if i == byte_count_to_process {
+                                                        // We're at the end of buffer, just break the
+                                                        // outer while loop
+                                                        byte_count_to_process = 0;
+                                                    }
+                                                }
+                                                Ok(Some(ie)) => {
+                                                    // We've got event, push it to the queue
+                                                    self.internal_events.push_back(ie);
+
+                                                    // Increase number of consumed bytes
+                                                    consumed_bytes += i;
+                                                    // Move the head
+                                                    self.tty_buffer_head_index += i;
+                                                    // Decrease number of bytes to process
+                                                    byte_count_to_process -= i;
+                                                    // Break the inner for loop
+                                                    break;
+                                                }
+                                                Err(_) => {
+                                                    // Increase number of consumed bytes
+                                                    consumed_bytes += i;
+                                                    // Move the head
+                                                    self.tty_buffer_head_index += i;
+                                                    // Decrease number of bytes to process
+                                                    byte_count_to_process -= i;
+                                                    // Break the inner for loop
+                                                    break;
+                                                }
+                                            };
+                                        }
                                     }
-                                    Ok(Some(ie)) => {
-                                        self.tty_buffer.clear();
-                                        return Ok(Some(ie));
+
+                                    // Update number of bytes left for future processing
+                                    self.tty_buffer_byte_count += read_count - consumed_bytes;
+
+                                    // If we're near the end of buffer ...
+                                    if self.tty_buffer_head_index + TTY_BUFFER_THRESHOLD
+                                        >= TTY_BUFFER_SIZE - 1
+                                    {
+                                        // ... and there're some bytes for future processing ...
+                                        if self.tty_buffer_byte_count > 0 {
+                                            // ... copy them to the buffer beginning ...
+                                            self.tty_buffer.copy_within(
+                                                self.tty_buffer_head_index
+                                                    ..self.tty_buffer_head_index
+                                                        + self.tty_buffer_byte_count,
+                                                0,
+                                            );
+                                        }
+                                        // ... and move the head index back to the beginning.
+                                        self.tty_buffer_head_index = 0;
                                     }
-                                    Err(_) => {
-                                        // Can't parse an event, clear buffer and start over
-                                        self.tty_buffer.clear();
+
+                                    // Return an event if we've got one
+                                    if let Some(event) = self.internal_events.pop_front() {
+                                        return Ok(Some(event));
                                     }
-                                };
+                                }
                             }
                             SIGNAL_TOKEN => {
                                 for signal in &self.signals {
