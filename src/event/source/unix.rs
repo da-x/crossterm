@@ -181,6 +181,8 @@ impl EventSource for UnixInternalEventSource {
                                         // knows how to parse csi sequence without a meaning (knows when the csi
                                         // sequence ends) and then it gives it a meaning. We do not need to
                                         // advance with byte by byte here.
+                                        let mut new_byte_count_to_process = byte_count_to_process;
+
                                         for i in 1..=byte_count_to_process {
                                             // More bytes to read? Yes if we're not at the end of the buffer
                                             // or poll says that there's more and we're at the end of the buffer
@@ -194,8 +196,8 @@ impl EventSource for UnixInternalEventSource {
                                                 Ok(None) => {
                                                     if i == byte_count_to_process {
                                                         // We're at the end of buffer, just break the
-                                                        // outer while loop
-                                                        byte_count_to_process = 0;
+                                                        // outer while loop by setting it to 0
+                                                        new_byte_count_to_process = 0;
                                                     }
                                                 }
                                                 Ok(Some(ie)) => {
@@ -207,7 +209,7 @@ impl EventSource for UnixInternalEventSource {
                                                     // Move the head
                                                     self.tty_buffer_head_index += i;
                                                     // Decrease number of bytes to process
-                                                    byte_count_to_process -= i;
+                                                    new_byte_count_to_process -= i;
                                                     // Break the inner for loop
                                                     break;
                                                 }
@@ -217,12 +219,14 @@ impl EventSource for UnixInternalEventSource {
                                                     // Move the head
                                                     self.tty_buffer_head_index += i;
                                                     // Decrease number of bytes to process
-                                                    byte_count_to_process -= i;
+                                                    new_byte_count_to_process -= i;
                                                     // Break the inner for loop
                                                     break;
                                                 }
                                             };
                                         }
+
+                                        byte_count_to_process = new_byte_count_to_process;
                                     }
 
                                     // Update number of bytes left for future processing
