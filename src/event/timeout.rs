@@ -19,22 +19,26 @@ impl PollTimeout {
     ///
     /// It always returns `false` if the initial timeout was set to `None`.
     pub fn elapsed(&self) -> bool {
-        self.timeout
-            .map(|timeout| self.start.elapsed() >= timeout)
-            .unwrap_or(false)
+        if let Some(timeout) = self.timeout {
+            self.start.elapsed() >= timeout
+        } else {
+            false
+        }
     }
 
     /// Returns the timeout leftover (initial timeout duration - elapsed duration).
     pub fn leftover(&self) -> Option<Duration> {
-        self.timeout.map(|timeout| {
+        if let Some(timeout) = self.timeout {
             let elapsed = self.start.elapsed();
 
-            if elapsed >= timeout {
+            Some(if elapsed >= timeout {
                 Duration::from_secs(0)
             } else {
                 timeout - elapsed
-            }
-        })
+            })
+        } else {
+            None
+        }
     }
 }
 

@@ -107,7 +107,7 @@ impl UnixInternalEventSource {
             signals,
             wake_read_fd,
             wake_write_fd,
-            internal_events: VecDeque::with_capacity(8),
+            internal_events: VecDeque::with_capacity(32),
         })
     }
 }
