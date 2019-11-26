@@ -1,5 +1,7 @@
 //
-// time socat -s -b4096 -u OPEN:./test.txt,ignoreeof EXEC:'cargo run --example socat',pty,setsid,ctty
+// time socat -s -b4096 -u OPEN:./test.txt,ignoreeof EXEC:'cargo run --example perf',pty,setsid,ctty
+//
+// Do not forget to add --release :)
 //
 use std::time::Duration;
 
