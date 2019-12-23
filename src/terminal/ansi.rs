@@ -21,3 +21,7 @@ pub(crate) fn scroll_down_csi_sequence(count: u16) -> String {
 pub(crate) fn set_size_csi_sequence(width: u16, height: u16) -> String {
     format!(csi!("8;{};{}t"), height, width)
 }
+
+pub(crate) fn set_scroll_region_csi_sequence(first_line: u16, last_line: u16) -> String {
+    format!(csi!("{};{}r"), first_line, last_line)
+}

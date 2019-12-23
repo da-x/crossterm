@@ -301,8 +301,23 @@ impl Command for SetSize {
     }
 }
 
+/// A command that sets the scroll region size.
+#[cfg(not(windows))]
+pub struct SetScrollRegionSize(pub u16, pub u16);
+
+#[cfg(not(windows))]
+impl Command for SetScrollRegionSize {
+    type AnsiType = String;
+
+    fn ansi_code(&self) -> Self::AnsiType {
+        ansi::set_scroll_region_csi_sequence(self.0, self.1)
+    }
+}
+
+
 impl_display!(for ScrollUp);
 impl_display!(for ScrollDown);
+impl_display!(for SetScrollRegionSize);
 impl_display!(for SetSize);
 impl_display!(for Clear);
 
