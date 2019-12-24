@@ -18,6 +18,14 @@ pub(crate) fn scroll_down_csi_sequence(count: u16) -> String {
     format!(csi!("{}T"), count)
 }
 
+pub(crate) fn scroll_region_insert_line_csi_sequence(count: u16) -> String {
+    format!(csi!("{}L"), count)
+}
+
+pub(crate) fn scroll_region_delete_line_csi_sequence(count: u16) -> String {
+    format!(csi!("{}M"), count)
+}
+
 pub(crate) fn set_size_csi_sequence(width: u16, height: u16) -> String {
     format!(csi!("8;{};{}t"), height, width)
 }

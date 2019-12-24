@@ -314,12 +314,43 @@ impl Command for SetScrollRegionSize {
     }
 }
 
+/// Insert line
+#[cfg(not(windows))]
+pub struct ScrollRegionInsertLine(pub u16);
+
+#[cfg(not(windows))]
+impl Command for ScrollRegionInsertLine {
+    type AnsiType = String;
+
+    fn ansi_code(&self) -> Self::AnsiType {
+        ansi::scroll_region_insert_line_csi_sequence(self.0)
+    }
+}
+
+/// Delete line
+#[cfg(not(windows))]
+pub struct ScrollRegionDeleteLine(pub u16);
+
+#[cfg(not(windows))]
+impl Command for ScrollRegionDeleteLine {
+    type AnsiType = String;
+
+    fn ansi_code(&self) -> Self::AnsiType {
+        ansi::scroll_region_delete_line_csi_sequence(self.0)
+    }
+}
 
 impl_display!(for ScrollUp);
 impl_display!(for ScrollDown);
-impl_display!(for SetScrollRegionSize);
 impl_display!(for SetSize);
 impl_display!(for Clear);
+
+#[cfg(not(windows))]
+impl_display!(for SetScrollRegionSize);
+#[cfg(not(windows))]
+impl_display!(for ScrollRegionInsertLine);
+#[cfg(not(windows))]
+impl_display!(for ScrollRegionDeleteLine);
 
 #[cfg(test)]
 mod tests {
