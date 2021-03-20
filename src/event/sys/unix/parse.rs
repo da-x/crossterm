@@ -51,6 +51,18 @@ pub(crate) fn parse_event(buffer: &[u8], input_available: bool) -> Result<Option
                                 val @ b'P'..=b'S' => Ok(Some(InternalEvent::Event(Event::Key(
                                     KeyCode::F(1 + val - b'P').into(),
                                 )))),
+                                b'B' => Ok(Some(InternalEvent::Event(Event::Key(
+                                    KeyCode::Down.into(),
+                                )))),
+                                b'A' => Ok(Some(InternalEvent::Event(Event::Key(
+                                    KeyCode::Up.into(),
+                                )))),
+                                b'C' => Ok(Some(InternalEvent::Event(Event::Key(
+                                    KeyCode::Right.into(),
+                                )))),
+                                b'D' => Ok(Some(InternalEvent::Event(Event::Key(
+                                    KeyCode::Left.into(),
+                                )))),
                                 _ => Err(could_not_parse_event_error()),
                             }
                         }
